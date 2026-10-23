@@ -1,151 +1,285 @@
-* {
-  box-sizing: border-box;
-}
+import { useEffect, useState } from "react";
+import "./App.css";
 
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #f1f5f9;
-  color: #1e293b;
-}
+const STORAGE_KEY = "quizResults";
 
-.app {
-  max-width: 900px;
-  margin: auto;
-  padding: 24px 16px;
-}
+function App() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [page, setPage] = useState("login");
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
+  const [results, setResults] = useState([]);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-.header {
-  text-align: center;
-  margin-bottom: 28px;
-}
+  // Load old results when the app opens
+  useEffect(() => {
+    const saved = JSON.parse(
+      localStorage.getItem(STORAGE_KEY) || "[]"
+    );
+    setResults(saved);
+  }, []);
 
-.header h1 {
-  color: #1d4ed8;
-  margin-bottom: 8px;
-}
+  // Fetch questions from Open Trivia DB
+  async function startQuiz(event) {
+    event.preventDefault();
+    setError("");
 
-.card {
-  background: white;
-  padding: 24px;
-  border-radius: 12px;
-  box-shadow: 0 4px 16px #00000012;
-  margin-bottom: 24px;
-}
+    if (!name.trim() || !email.trim()) {
+      setError("Please fill in all fields.");
+      return;
+    }
 
-label {
-  display: block;
-  margin: 16px 0 6px;
-}
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email.");
+      return;
+    }
 
-input:not([type="radio"]),
-select {
-  width: 100%;
-  padding: 11px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  margin-bottom: 8px;
-}
+    setLoading(true);
 
-button {
-  padding: 12px 18px;
-  margin-top: 18px;
-  margin-right: 8px;
-  background: #2563eb;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
+    try {
+      const response = await fetch(
+        "https://opentdb.com/api.php?amount=5&category=18&type=multiple&encode=url3986"
+      );
 
-button:hover {
-  background: #1d4ed8;
-}
+      if (!response.ok) {
+        throw new Error("Could not connect to the quiz API.");
+      }
 
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+      const data = await response.json();
 
-.secondary {
-  background: #475569;
-}
+      if (data.response_code !== 0 || data.results.length === 0) {
+        throw new Error("No questions available. Please try again later.");
+      }
 
-.error {
-  color: #dc2626;
-}
+      const loadedQuestions = data.results.map((item) => {
+        const decode = (text) => decodeURIComponent(text);
 
-.question {
-  border-top: 1px solid #e2e8f0;
-  padding: 16px 0;
-}
+        const correct = decode(item.correct_answer);
+        const options = [
+          ...item.incorrect_answers.map(decode),
+          correct,
+        ].sort(() => Math.random() - 0.5);
 
-.question h3 {
-  font-size: 17px;
-  line-height: 1.5;
-}
+        return {
+          question: decode(item.question),
+          options,
+          correctAnswer: correct,
+          category: decode(item.category),
+        };
+      });
 
-.category {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.option {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px;
-  margin: 7px 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.option input {
-  margin: 0;
-}
-
-.option:hover {
-  background: #eff6ff;
-}
-
-.table-wrapper {
-  overflow-x: auto;
-  margin-top: 18px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-}
-
-th,
-td {
-  padding: 12px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-th {
-  background: #dbeafe;
-}
-
-.result {
-  text-align: center;
-}
-
-@media (max-width: 600px) {
-  .card {
-    padding: 16px;
+      setQuestions(loadedQuestions);
+      setAnswers({});
+      setPage("quiz");
+    } catch (err) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  .header h1 {
-    font-size: 25px;
+  // Save the selected answer for a question
+  function selectAnswer(questionIndex, answer) {
+    setAnswers((previous) => ({
+      ...previous,
+      [questionIndex]: answer,
+    }));
   }
 
-  th,
-  td {
-    padding: 8px;
-    font-size: 13px;
+  // Calculate and save the final score
+  function submitQuiz() {
+    const score = questions.reduce((total, question, index) => {
+      return total +
+        (answers[index] === question.correctAnswer ? 1 : 0);
+    }, 0);
+
+    const newResult = {
+      id: Date.now(),
+      name: name.trim(),
+      email: email.trim(),
+      score,
+      total: questions.length,
+      date: new Date().toLocaleDateString(),
+    };
+
+    const updatedResults = [...results, newResult];
+
+    setResults(updatedResults);
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(updatedResults)
+    );
+
+    setPage("result");
   }
+
+  // Search names and filter by score
+  const filteredResults = results
+    .filter((result) =>
+      result.name.toLowerCase().includes(search.toLowerCase())
+    )
+    .filter((result) => {
+      if (filter === "high") return result.score >= 4;
+      if (filter === "low") return result.score < 4;
+      return true;
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return (
+    <main className="app">
+      <header className="header">
+        <h1>Quiz & Leaderboard</h1>
+        <p>Test your knowledge and track your score</p>
+      </header>
+
+      {page === "login" && (
+        <section className="card">
+          <h2>Participant Login</h2>
+          <form onSubmit={startQuiz}>
+            <label htmlFor="name">Full name</label>
+            <input
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter your name"
+            />
+
+            <label htmlFor="email">Email address</label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+            />
+
+            {error && <p className="error">{error}</p>}
+
+            <button disabled={loading} type="submit">
+              {loading ? "Loading questions..." : "Start Quiz"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {page === "quiz" && (
+        <section className="card">
+          <h2>General Knowledge Quiz</h2>
+          <p>Participant: {name}</p>
+          <p>Select one answer for each question.</p>
+
+          {questions.map((question, index) => (
+            <div className="question" key={index}>
+              <h3>
+                {index + 1}. {question.question}
+              </h3>
+              <p className="category">{question.category}</p>
+
+              {question.options.map((option) => (
+                <label className="option" key={option}>
+                  <input
+                    type="radio"
+                    name={`question-${index}`}
+                    checked={answers[index] === option}
+                    onChange={() => selectAnswer(index, option)}
+                  />
+                  {option}
+                </label>
+              ))}
+            </div>
+          ))}
+
+          <button onClick={submitQuiz}>Submit Quiz</button>
+        </section>
+      )}
+
+      {page === "result" && (
+        <section className="card result">
+          <h2>Quiz Completed!</h2>
+          <p>Participant: {name}</p>
+          <p>
+            Your score:{" "}
+            <strong>
+              {results[results.length - 1]?.score} /{" "}
+              {results[results.length - 1]?.total}
+            </strong>
+          </p>
+          <button onClick={() => setPage("leaderboard")}>
+            View Leaderboard
+          </button>
+          <button
+            className="secondary"
+            onClick={() => {
+              setAnswers({});
+              setPage("login");
+            }}
+          >
+            Take Another Quiz
+          </button>
+        </section>
+      )}
+
+      {page === "leaderboard" && (
+        <section className="card">
+          <h2>Leaderboard</h2>
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search participant by name"
+          />
+
+          <label htmlFor="scoreFilter">Filter scores</label>
+          <select
+            id="scoreFilter"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          >
+            <option value="all">All scores</option>
+            <option value="high">High scores (4–5)</option>
+            <option value="low">Low scores (0–3)</option>
+          </select>
+
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Participant</th>
+                  <th>Score</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredResults.map((result, index) => (
+                  <tr key={result.id}>
+                    <td>{index + 1}</td>
+                    <td>{result.name}</td>
+                    <td>
+                      {result.score}/{result.total}
+                    </td>
+                    <td>{result.date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {filteredResults.length === 0 && (
+            <p>No results found.</p>
+          )}
+
+          <button onClick={() => setPage("login")}>
+            Back to Login
+          </button>
+        </section>
+      )}
+    </main>
+  );
 }
+
+export default App;
